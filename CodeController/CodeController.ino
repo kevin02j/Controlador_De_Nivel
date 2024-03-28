@@ -16,7 +16,7 @@ void loop() {
   digitalWrite(TRIGGER_PIN, LOW);
 
   long duration = pulseIn(ECHO_PIN, HIGH);
-  float distance = (duration * 0.034) / 2;
+  int distance = (duration * 0.034) / 2;
 
   // Imprime la distancia medida
   Serial.println(distance);
