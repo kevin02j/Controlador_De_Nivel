@@ -1,32 +1,32 @@
 #include <NewPing.h>
 
-#define TRIGGER_PIN  4  
-#define ECHO_PIN     5 
-#define MAX_DISTANCE 50 // Distancia máxima a medir (en centímetros)
+#define TRIGGER_PIN 2
+#define ECHO_PIN 3
+#define MAX_DISTANCE 50  // Distancia máxima a medir (en centímetros)
 
 // Objeto para manejar el sensor HC-SR04
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
 
-const int bombaIn = 3;
-const int bombaOut = 2;
+const int bombaIn = 5;
+const int bombaOut = 6;
 
 String frameReceived;
 
 // Definición de los coeficientes del filtro FIR
-const int N = 10; // Longitud del filtro (número de coeficientes)
-const float h[N] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1}; // Coeficientes del filtro
+const int N = 3;                                                         // Longitud del filtro (número de coeficientes)
+const float h[N] = { 0.1, 0.1, 0.1 };  // Coeficientes del filtro
 
 // Variables para almacenar las muestras de entrada y salida
-float x[N] = {0}; // Buffer circular para almacenar las muestras de entrada
-float y = 0; // Muestra de salida filtrada
+float x[N] = { 0 };  // Buffer circular para almacenar las muestras de entrada
+float y = 0;         // Muestra de salida filtrada
 
 // Variables de trabajo del PID
-unsigned long lastTime;
-double Input, Output, Setpoint, error;
-double ITerm, lastInput;
-double kp = 32.2, ki = 10.0, kd = 2.5;
-int SampleTime = 500;  // Tiempo de muestreo 0.5 segundos.
-double outMin = 0, outMax = 255;
+int lastTime;
+int Input, Output, Setpoint, error, errorN;
+int ITerm, lastInput;
+double kp =35.0, ki = 5.8, kd = 0.71;
+int SampleTime = 200;  // Tiempo de muestreo 0.5 segundos.
+int outMin = 0, outMax = 255;
 bool inAuto = false;
 #define MANUAL 0
 #define AUTOMATIC 1
@@ -43,56 +43,33 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    unsigned int distance = sonar.ping_cm();
-    Input  = filter(distance);
-    int ModeOperation = ReadSerialPort();
-
-    if (ModeOperation == 2) {
-      //Modo Automatico
-      String Adjust = frameReceived.substring(1);
-      Setpoint = Adjust.toInt();
-      SetTunings(kp, ki, kd);
-      SetSampleTime(SampleTime);
-      SetOutputLimits(outMin, outMax);
-      SetMode(1);
-      SetControllerDirection(1);
-      Compute();
-      AcciondeControl();
-    } else if (ModeOperation == 1) {
-      //Modo Manual
-      char ingreso = frameReceived.charAt(1);
-      char salida = frameReceived.charAt(2);
-      int stateBombaIN = ingreso - '0';
-      int stateBombaOUT = salida - '0';
-
-      if (stateBombaIN == 1) {
-        analogWrite(bombaIn, 255);
-      } else {
-        analogWrite(bombaIn, 0);
-      }
-      if (stateBombaOUT == 1) {
-        analogWrite(bombaOut, 255);
-      } else {
-        analogWrite(bombaOut, 0);
-      }
-      Serial.println(Input);
-      delay(100);
-    }
-  }
-}
-int ReadSerialPort() {
-  if (Serial.available()) {
-    frameReceived = Serial.read();
-    char modePos = frameReceived.charAt(0);
-    if (modePos == '1' || modePos == '2') {
-      return modePos - '0';
-    }
-  }
-  return -1;  // Retornar un valor inválido si no se recibió un modo válido
+  unsigned int distance = sonar.ping_cm();
+  //Serial.println(distance);
+  int level = map(distance, 13, 3, 1, 100);
+  // int level = filter(distance);
+  Input=level;
+  Setpoint = Lectura_SetPoint();
+  SetTunings(kp, ki, kd);
+  SetSampleTime(SampleTime);
+  SetOutputLimits(outMin, outMax);
+  SetMode(1);
+  SetControllerDirection(1);
+  Compute();
+  AcciondeControl();
+  // Serial.println("Set point: " + String(Setpoint));
+  // Serial.println("Level: " + String(Input));
+  //Serial.println("PWM1: " + String(Output));
+  Serial.println(String(Input) + "," + String(Setpoint));
+  delay(SampleTime);
 }
 
-float filter(float input) {
+float Lectura_SetPoint() {
+  int ADC_Channel_1 = analogRead(A7);
+  int reference = map(ADC_Channel_1, 0, 1023, 10, 90);
+  return reference;
+}
+
+int filter(int input) {
   // Agregar la nueva muestra al buffer circular
   for (int i = N - 1; i > 0; i--) {
     x[i] = x[i - 1];
@@ -104,38 +81,27 @@ float filter(float input) {
   for (int i = 0; i < N; i++) {
     y += h[i] * x[i];
   }
-
-  return y;
-}
-
-void sendInfo(int bomba1, int bomba2) {
-  String frameToSend = String(bomba1) + "," + String(bomba2) + "," + String(Input);
-  Serial.println(frameToSend);
+  int level = map(y, 17, 3, 1, 100);
+  return level;
 }
 
 void AcciondeControl() {
-  if (error <= 0) {
-    if (Output == 255) {
-      analogWrite(bombaOut, 255);
-      analogWrite(bombaIn, 50);
-      sendInfo(50, 255);
-    } else {
-      analogWrite(bombaOut, Output);
-      analogWrite(bombaIn, 50);
-      sendInfo(50, Output);
-    }
-  } else {
-    if (Output == 255) {
-      analogWrite(bombaIn, 255);
-      analogWrite(bombaOut, 50);
-      sendInfo(255, 50);
-    } else {
-      analogWrite(bombaIn, Output);
-      analogWrite(bombaOut, 50);
-      sendInfo(Output, 50);
-    }
-  }
+  //Serial.println("Error: " + String(error));
+  int pwm_bomba_2 = map(Output, 0, 255, 255, 0);
+  //Serial.println("PWM2: " + String(pwm_bomba_2));
+  analogWrite(bombaOut, pwm_bomba_2);
+  analogWrite(bombaIn, Output);
+  // if (errorN >= 0) {
+  //   Serial.println("llenar");
+  //   analogWrite(bombaOut, Output);
+  //   analogWrite(bombaIn, 0);
+  // } else {
+  //   Serial.println("Vaciar");
+  //   analogWrite(bombaOut, 0);
+  //   analogWrite(bombaIn, Output);
+  // }
 }
+
 
 void Compute() {
   if (!inAuto) return;
@@ -144,6 +110,11 @@ void Compute() {
   if (timeChange >= SampleTime) {
     // Calculamos todos los errores.
     error = Setpoint - Input;
+    // if (errorN < 0) {
+    //   error = abs(errorN);
+    // } else {
+    //   error = errorN;
+    // }
     ITerm += (ki * error);
     if (ITerm > outMax) ITerm = outMax;
     else if (ITerm < outMin) ITerm = outMin;
